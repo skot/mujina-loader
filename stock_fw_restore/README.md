@@ -90,6 +90,22 @@ shasum -a 256 -c SHA256SUMS
 ## Burn workflow
 
 1. Put the board into USB burn mode and attach it to the Mac.
+   If a normal power cycle does not show the expected `InUsbBurn` serial output,
+   connect over the serial console, interrupt U-Boot, and run:
+
+```text
+run usb_burning
+```
+
+   If `run usb_burning` is unavailable, try:
+
+```text
+update 1000
+```
+
+   On the board tested here, `usb_burning=update 1000` in the stock U-Boot env,
+   and forcing that command path was enough to make the board enumerate again in
+   Amlogic USB burn mode.
 2. Confirm macOS sees the Amlogic device:
 
 ```bash

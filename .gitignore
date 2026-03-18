@@ -1,1 +1,17 @@
 /local/
+.DS_Store
+
+# Python cache
+__pycache__/
+
+# Generated Mujina payload artifacts
+/mujina_loader/payload/
+/mujina_loader/payload-fit/
+/mujina_loader/payload-prod/
+/mujina_loader/payload-stockboot/
+/mujina_loader/payload-stockboot-compat/
+/mujina_loader/payload-stockdtb/
+/mujina_loader/reference/*.bin
+
+# Local vendor source drop; documented in yocto/sources/README.md
+/yocto/sources/linux-s21-aml-vendor/
