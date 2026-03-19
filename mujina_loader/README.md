@@ -1,8 +1,5 @@
 # Mujina Loader for S21 AML
 
-This directory contains a first-pass replacement for the Amlogic `stage4_aml`
-flow used by LuxOS Commander.
-
 The design goal is destructive boot replacement on stock Amlogic control boards:
 
 - reformat `mtd6` / `nvdata`
@@ -32,6 +29,39 @@ This workflow does not preserve stock miner config.
   - current recommended payload for vendor-kernel bring-up; keeps the stock
     `mtd4` boot image, adds a simpler DHCP config for `eth0`, and masks the
     systemd units that were dropping the board into emergency mode
+- `build_yocto_kernel_compat_payload.sh`
+  - assembles a custom-kernel test payload from the Yocto-built `Image`, the
+    deployed validated DTB, and the already-working compat rootfs
+- `payload-yocto-kernel-compat`
+  - custom-kernel test payload that changes only kernel/DTB boot while keeping
+    the known-good compat rootfs constant
+- `build_static_rescue_payload.sh`
+  - builds a minimal static BusyBox rescue rootfs and pairs it with the custom
+    Yocto kernel for early-userspace debugging
+- `payload-yocto-kernel-rescue`
+  - custom-kernel rescue payload for debugging PID 1 crashes without the full
+    glibc/systemd userspace
+- `build_static_rescue_payload_armhf.sh`
+  - builds a minimal static BusyBox rescue rootfs as `armhf` and pairs it with
+    the custom Yocto kernel to test the same 32-bit userspace mode used by the
+    known-good amlogic-cb-tools `4.9.337` board
+- `payload-yocto-kernel-rescue-armhf`
+  - custom-kernel rescue payload for testing whether the kernel reliably starts
+    a 32-bit PID 1 even when the aarch64 rescue payload crashes
+- `build_armhf_network_payload.sh`
+  - builds a minimal `armhf` Mujina bring-up rootfs with DHCP on `eth0`,
+    BusyBox `httpd`, and BusyBox `telnetd`, then pairs it with the custom Yocto
+    kernel and DTB
+- `payload-yocto-kernel-armhf-net`
+  - custom-kernel `armhf` network bring-up payload intended to come up on the
+    LAN instead of only dropping to a serial shell
+- `build_armhf_full_payload.sh`
+  - builds a fuller `armhf` Mujina development userspace from Debian Bookworm
+    with SSH, telnet, common CLI tools, and the same proven custom-kernel boot
+    path
+- `payload-yocto-kernel-armhf-full`
+  - fuller custom-kernel `armhf` payload for development on the LAN with
+    password login as `root/root`
 
 ## Asset contract
 
@@ -59,7 +89,7 @@ The custom-kernel flow remains available in `./payload` and expects:
 You can populate that directory from the successful Yocto build with:
 
 ```bash
-cd /Users/skot/Bitcoin/Mujina/mujna-loader/mujina_loader
+cd mujina_loader
 ./assemble_yocto_payload.sh
 ```
 
@@ -70,6 +100,78 @@ That script exports:
 - `mujina-image-dev` rootfs tarball
 - generated `nand_env.bin`
 - `SHA256SUMS` and `manifest.txt`
+
+For the next lower-risk custom-kernel test, build the focused compat payload:
+
+```bash
+cd mujina_loader
+./build_yocto_kernel_compat_payload.sh
+```
+
+That payload reuses the known-good compat rootfs from `payload-stockboot-compat`
+and only changes:
+
+- kernel: Yocto-built `Image`
+- DTB: deployed validated `axg_s400_antminer.dtb`
+- boot mode: `ubifs-image` / `booti`
+
+For PID 1 / userspace crash debugging under the custom kernel, build the static
+rescue payload:
+
+```bash
+cd mujina_loader
+./build_static_rescue_payload.sh
+```
+
+That payload keeps:
+
+- custom Yocto-built `Image`
+- validated `axg_s400_antminer.dtb`
+
+and replaces the rootfs with a tiny static BusyBox environment whose `/sbin/init`
+mounts `/proc`, `/sys`, and `/dev`, prints a few diagnostics, tries
+`/usr/bin/bash.bash` if present, and then drops to a serial shell.
+
+To test the working hypothesis that the known-good `4.9.337` board is happiest
+with a 32-bit userspace, build the `armhf` rescue payload:
+
+```bash
+cd mujina_loader
+./build_static_rescue_payload_armhf.sh
+```
+
+That payload keeps the same custom kernel and DTB, but replaces the rootfs with
+a statically linked `armhf` BusyBox userspace and a simple shell-script init.
+
+To build the next-step `armhf` rootfs with DHCP and LAN access:
+
+```bash
+cd mujina_loader
+./build_armhf_network_payload.sh
+```
+
+That payload currently:
+
+- brings up `eth0` with `udhcpc`
+- serves a small status page with BusyBox `httpd`
+- exposes a shell with BusyBox `telnetd`
+- keeps the same custom kernel and DTB that already reached a working `armhf`
+  rescue shell
+
+To build the fuller `armhf` development userspace:
+
+```bash
+cd mujina_loader
+./build_armhf_full_payload.sh
+```
+
+That payload currently:
+
+- keeps the proven custom kernel and DTB path
+- uses a Debian Bookworm `armhf` userspace
+- provides `root/root` login over Dropbear SSH
+- keeps telnet and the HTTP status page for easy bring-up
+- includes a broader CLI toolbox for experimentation directly on the board
 
 The rootfs tarball must unpack into the UBI volume root and provide at least:
 
@@ -131,6 +233,6 @@ current recommended first-boot route because it reuses the board's known-good
 With a successful Yocto build, the next end-to-end installer step is:
 
 ```bash
-cd /Users/skot/Bitcoin/Mujina/mujna-loader/mujina_loader
+cd mujina_loader
 ./install_mujina_aml.sh --host 192.168.1.52
 ```

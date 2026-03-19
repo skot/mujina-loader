@@ -15,3 +15,6 @@ __pycache__/
 
 # Local vendor source drop; documented in yocto/sources/README.md
 /yocto/sources/linux-s21-aml-vendor/
+
+# Generated stock-signed USB burn artifacts
+/mujina-usburner/output/
