@@ -1,7 +1,0 @@
-Khadas utils
-repo: https://github.com/khadas/utils.git
-commit: be77ffc020f4e9766c62d409a8ab1804245d5ef4
-
-HashSource Antminer S21x firmware
-repo: https://github.com/HashSource/hashsource_antminer_S21x.git
-commit: e239c99f98220cf252b1f9613fb00a538915a8e8

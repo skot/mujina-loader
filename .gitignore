@@ -4,17 +4,12 @@
 # Python cache
 __pycache__/
 
-# Generated Mujina payload artifacts
-/mujina_loader/payload/
-/mujina_loader/payload-fit/
-/mujina_loader/payload-prod/
-/mujina_loader/payload-stockboot/
-/mujina_loader/payload-stockboot-compat/
-/mujina_loader/payload-stockdtb/
-/mujina_loader/reference/*.bin
+# Generated Mujina image artifacts
+/mujina_loader/mujina_armhf_base/
+/mujina_loader/mujina_armhf_full/
 
-# Local vendor source drop; documented in yocto/sources/README.md
-/yocto/sources/linux-s21-aml-vendor/
+# Local Yocto/BSP worktree
+/yocto/
 
 # Generated stock-signed USB burn artifacts
-/mujina-usburner/output/
+/tools/mujina-usburner/output/

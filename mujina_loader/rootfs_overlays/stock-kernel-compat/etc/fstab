@@ -1,5 +1,0 @@
-# Minimal fstab for the stock-kernel Mujina bring-up path.
-# The kernel already mounts the UBIFS root, and /run is provided by systemd.
-
-proc   /proc     proc    defaults                             0 0
-devpts /dev/pts  devpts  mode=0620,ptmxmode=0666,gid=5       0 0

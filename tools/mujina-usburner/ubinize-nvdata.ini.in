@@ -1,0 +1,7 @@
+[ubifs]
+mode=ubi
+image=@UBIFS_IMAGE@
+vol_id=0
+vol_type=dynamic
+vol_name=@VOLUME_NAME@
+vol_flags=autoresize

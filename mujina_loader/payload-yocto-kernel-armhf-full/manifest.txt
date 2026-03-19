@@ -1,9 +1,0 @@
-boot_mode=ubifs-image
-boot_source=mtd6:mujina_rootfs via U-Boot ubifsload + booti
-kernel_source=yocto-custom-kernel
-dtb_source=yocto-deployed-validated-dtb
-rootfs_source=debian-bookworm-armhf-with-busybox-init
-hostname=mujina-armhf
-ssh_port=22
-telnet_port=2323
-http_port=80

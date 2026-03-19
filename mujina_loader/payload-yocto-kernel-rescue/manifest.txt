@@ -1,9 +1,0 @@
-boot_mode=ubifs-image
-boot_source=mtd6:mujina_rootfs via U-Boot ubifsload + booti
-kernel_source=yocto-custom-kernel
-dtb_source=validated-prebuilt-dtb
-rootfs_profile=static-busybox-rescue
-rootfs_archive=rootfs.tar.gz
-env_blob=nand_env.bin
-busybox_version=1.36.1
-entrypoint=/sbin/init
