@@ -296,6 +296,43 @@ Signing / trust impact:
 - DTB loaded as a plain file from UBIFS
 - Userspace, init scripts, services, and everything above the kernel
 
+## Boot Stage To Storage Map
+
+This table is the current best map from named boot stages to on-flash storage on this board.
+
+| Stage / artifact | Storage location on this board | Confidence | Why |
+|---|---|---|---|
+| `BL1` / BootROM | SoC internal ROM | Confirmed | Directly shown by the `AXG:BL1:...` banner and not flash-resident by design. |
+| `BL2` | Flash-resident secure bootloader area, most likely within `bootloader` | High | `BL2` runs before normal partition discovery and then loads FIP from raw NAND `part: 0`. |
+| FIP header | Flash-resident secure bootloader area, most likely within `bootloader` | High | Boot log: `Load FIP HDR from NAND ... part: 0`. |
+| `BL30` | Inside the FIP / secure bootloader package | High | Boot log: `bl30:axg ver: 9 mode: 0`. |
+| `BL31` | Inside the FIP / secure bootloader package | High | Boot log prints `BL31` version/build info and `AXG secure boot!`. |
+| `BL33` | Inside the FIP / secure bootloader package, decompressed into RAM before U-Boot | High | Boot log: `BL31: BL33 decompress pass`, followed by U-Boot startup. |
+| Stock U-Boot environment | Reserved NAND env area `nenv`; exposed to Linux as `/dev/nand_env` | Confirmed | Boot log shows `amlnf_env_read` / `read nenv info`; repo rewrites `/dev/nand_env` directly. |
+| Stock flash DTB used during normal boot | Reserved NAND DTB area `ndtb` | Confirmed | Boot log shows `amlnf dtb_read`, `read ndtb info`, then `Found DTB for "axg_s400_v03sbr"`. |
+| Stock kernel / boot image | `boot` partition (`mtd4`) | Confirmed | Stock env uses `imgread kernel ${boot_part}` with `boot_part=boot`; partition map matches `mtd4`. |
+| Mujina rootfs | `nvdata` partition (`mtd6`) | Confirmed | U-Boot and Linux both attach/use `nvdata` as UBI with `mujina_rootfs`. |
+| `tpl` partition | Bootloader-adjacent vendor storage; exact role still unclear | Medium | U-Boot exposes `tpl`, but the earlier BL2/FIP load is from raw NAND `part: 0`, before normal partition handling. |
+
+### What USB Burn Replaces In This Map
+
+When we flash a stock-signed image with this repo's USB burn workflow:
+
+- `bootloader` is replaced with the stock signed bootloader package from the image.
+- `_aml_dtb` is replaced with the stock signed/encrypted DTB payload from the image.
+- `boot` is replaced with the stock signed boot image from the image.
+- `recovery` is replaced with the stock signed recovery image from the image.
+- `nvdata` is replaced with our generated Mujina UBI image.
+- `nand_env` is rewritten afterward by `env import` + `save`, outside the packed partition image itself.
+
+### Current Best Interpretation Of `bootloader` vs `tpl`
+
+- `bootloader` should be treated as containing the critical secure early boot content, at least the material needed for `BL2` and FIP/BL3x handoff.
+- `tpl` is clearly bootloader-related, but we do not yet have proof that it is itself part of the ROM-verified chain.
+- So the safe operational rule is:
+  - if it is needed before stock U-Boot is fully running, assume it is part of the signed boot chain
+  - if we have not dumped and parsed it yet, do not assume `bootloader` alone equals every non-ROM stage
+
 ## Practical Takeaway For Mujina
 
 The safest strategy on this board is:
