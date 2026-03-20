@@ -13,3 +13,6 @@ __pycache__/
 
 # Generated stock-signed USB burn artifacts
 /tools/mujina-usburner/output/
+
+# Generated custom-kernel build artifacts
+/tools/kernel_build/output/

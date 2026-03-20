@@ -30,6 +30,14 @@ IMAGE_CFG="${UNPACK_DIR}/image.cfg"
 NV_PARTITION_NAME="nvdata.PARTITION"
 OUTPUT_NV_PARTITION="${OUTPUT_DIR}/${NV_PARTITION_NAME}"
 
+find_payload_dtb() {
+  local count
+  count="$(find "${PAYLOAD_DIR}" -maxdepth 1 -name '*.dtb' | wc -l | tr -d ' ')"
+  if [[ "${count}" == "1" ]]; then
+    find "${PAYLOAD_DIR}" -maxdepth 1 -name '*.dtb' | head -n 1
+  fi
+}
+
 cleanup() {
   rm -rf "${WORK_DIR}"
 }
@@ -85,6 +93,13 @@ build_nvdata_partition() {
   max_leb_cnt="$(calc_max_leb_cnt)"
   leb_size="$(calc_leb_size)"
 
+  local payload_dtb payload_dtb_name
+  payload_dtb="$(find_payload_dtb || true)"
+  payload_dtb_name=""
+  if [[ -n "${payload_dtb}" ]]; then
+    payload_dtb_name="$(basename "${payload_dtb}")"
+  fi
+
   mkdir -p "${UBI_WORK_DIR}" "${OUTPUT_DIR}"
   sed \
     -e "s,@UBIFS_IMAGE@,/work/mujina_rootfs.ubifs,g" \
@@ -106,6 +121,12 @@ import tarfile
 with tarfile.open('/input/rootfs.tar.gz', 'r:gz') as tar:
     tar.extractall('/work/rootfs')
 PY
+      if [[ -f /input/Image ]]; then
+        cp /input/Image /work/rootfs/Image
+      fi
+      if [[ -n '${payload_dtb_name}' && -f /input/'${payload_dtb_name}' ]]; then
+        cp /input/'${payload_dtb_name}' /work/rootfs/'${payload_dtb_name}'
+      fi
       mkfs.ubifs \
         -r /work/rootfs \
         -m ${MIN_IO_SIZE} \
@@ -136,18 +157,41 @@ EOF
 }
 
 generate_env_artifacts() {
-  python3 "${ENV_GENERATOR}" \
-    --template "${ENV_TEMPLATE}" \
-    --output "${OUTPUT_ENV_BIN}" \
-    --boot-mode stock-boot \
-    --volume-name "${VOLUME_NAME}" \
-    --mtd-index "${MTD_INDEX}"
+  local payload_dtb payload_dtb_name boot_mode
+  local env_args
+  payload_dtb="$(find_payload_dtb || true)"
+  payload_dtb_name=""
+  boot_mode="stock-boot"
+  if [[ -f "${PAYLOAD_DIR}/Image" && -n "${payload_dtb}" ]]; then
+    payload_dtb_name="$(basename "${payload_dtb}")"
+    boot_mode="ubifs-image"
+  fi
 
-  cat > "${OUTPUT_ENV_TEXT}" <<EOF
+  env_args=(
+    --template "${ENV_TEMPLATE}"
+    --output "${OUTPUT_ENV_BIN}"
+    --boot-mode "${boot_mode}"
+    --volume-name "${VOLUME_NAME}"
+    --mtd-index "${MTD_INDEX}"
+  )
+  if [[ -n "${payload_dtb_name}" ]]; then
+    env_args+=(--dtb-filename "${payload_dtb_name}")
+  fi
+  python3 "${ENV_GENERATOR}" "${env_args[@]}"
+
+  if [[ "${boot_mode}" == "ubifs-image" ]]; then
+    cat > "${OUTPUT_ENV_TEXT}" <<EOF
+setenv mujinaboot 'ubi part nvdata; ubifsmount ubi0:${VOLUME_NAME}; ubifsload \${ker_addr} Image; ubifsload \${dtb_addr} ${payload_dtb_name}; setenv bootargs "init=/sbin/init console=ttyS0,115200 no_console_suspend earlycon=aml_uart,0xff803000 jtag=disable root=ubi0:${VOLUME_NAME} rootfstype=ubifs rw ubi.mtd=${MTD_INDEX},2048"; booti \${ker_addr} - \${dtb_addr}'
+setenv bootcmd 'run mujinaboot || run storeboot'
+save
+EOF
+  else
+    cat > "${OUTPUT_ENV_TEXT}" <<EOF
 setenv mujinaboot 'run storeargs; setenv bootargs \${bootargs} root=ubi0:${VOLUME_NAME} rootfstype=ubifs rw ubi.mtd=${MTD_INDEX},2048 init=/sbin/init skip_initramfs; if imgread kernel \${boot_part} \${loadaddr}; then bootm \${loadaddr}; fi'
 setenv bootcmd 'run mujinaboot || run storeboot'
 save
 EOF
+  fi
 }
 
 repack_image() {
@@ -158,11 +202,22 @@ repack_image() {
 }
 
 write_manifest() {
+  local payload_dtb payload_dtb_name boot_mode kernel_mode
+  payload_dtb="$(find_payload_dtb || true)"
+  payload_dtb_name=""
+  boot_mode="stock-boot"
+  kernel_mode="stock-mtd4"
+  if [[ -f "${PAYLOAD_DIR}/Image" && -n "${payload_dtb}" ]]; then
+    payload_dtb_name="$(basename "${payload_dtb}")"
+    boot_mode="ubifs-image"
+    kernel_mode="payload-ubifs-image"
+  fi
+
   cat > "${OUTPUT_DIR}/manifest.txt" <<EOF
 base_image=${STOCK_IMAGE}
 payload_dir=${PAYLOAD_DIR}
-boot_mode=stock-boot
-boot_source=mtd4:boot via imgread kernel \${boot_part} \${loadaddr}; bootm \${loadaddr}
+boot_mode=${boot_mode}
+boot_source=${kernel_mode}
 rootfs_partition=nvdata (mtd${MTD_INDEX})
 rootfs_volume=${VOLUME_NAME}
 partition_size=${PARTITION_SIZE}
@@ -173,6 +228,8 @@ max_leb_cnt=$(calc_max_leb_cnt)
 nvdata_partition_file=${NV_PARTITION_NAME}
 env_text_file=$(basename "${OUTPUT_ENV_TEXT}")
 env_bin_file=$(basename "${OUTPUT_ENV_BIN}")
+payload_kernel_present=$([[ -f "${PAYLOAD_DIR}/Image" ]] && echo yes || echo no)
+payload_dtb_file=${payload_dtb_name:-none}
 EOF
 
   (

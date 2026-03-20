@@ -7,6 +7,9 @@ This directory contains the release-facing deployment and recovery tooling.
 - `network_install/`
   - in-place install path for a running stock board over the network
   - includes the stock bootstrap helper and `mujina_stage4_aml.sh`
+- `kernel_build/`
+  - direct Docker-based custom-kernel build/install path
+  - seeded from the known-good `amlogic-cb-tools` kernel workflow
 - `mujina-usburner/`
   - builds and flashes direct USB burn images for Mujina
 - `stock_fw_restore/`

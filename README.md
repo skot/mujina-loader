@@ -16,6 +16,9 @@ This repo is organized around one release goal:
   - installs Mujina onto a running stock board over the network
   - uses the stock `miner` bootstrap path and rewrites `mtd6`
   - docs: [`tools/README.md`](tools/README.md)
+- `tools/kernel_build/`
+  - builds and installs a direct custom-kernel path without Yocto
+  - docs: [`tools/kernel_build/README.md`](tools/kernel_build/README.md)
 - `tools/mujina-usburner/`
   - builds stock-signed USB burn images that preload Mujina
   - docs: [`tools/mujina-usburner/README.md`](tools/mujina-usburner/README.md)
