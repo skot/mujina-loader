@@ -7,6 +7,7 @@ ENV_GENERATOR="${SCRIPT_DIR}/generate_nand_env.py"
 OUT_PAYLOAD="${OUT_PAYLOAD:-${SCRIPT_DIR}/mujina_armhf_full}"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/mujina-armhf-full.XXXXXX")"
 ROOTFS_DIR="${WORK_DIR}/rootfs"
+FINALIZE_DIR="${ROOTFS_DIR}/etc/mujina/finalize"
 PROVISION_SCRIPT="${WORK_DIR}/provision-armhf-full.sh"
 DOCKER_IMAGE="${DOCKER_IMAGE:-debian:bookworm-slim}"
 HOSTNAME_VALUE="${HOSTNAME_VALUE:-mujina-armhf}"
@@ -20,6 +21,9 @@ ROOT_PASSWORD="${ROOT_PASSWORD:-root}"
 ENABLE_SSH="${ENABLE_SSH:-1}"
 ENABLE_TELNET="${ENABLE_TELNET:-1}"
 ENABLE_HTTP="${ENABLE_HTTP:-1}"
+FINALIZE_FLAG="${FINALIZE_FLAG:-mujina.finalize=1}"
+STAGING_ENV="${WORK_DIR}/nand_env.staging.bin"
+RUNTIME_ENV="${WORK_DIR}/nand_env.runtime.bin"
 
 cleanup() {
   if [[ -n "${CONTAINER_ID:-}" ]]; then
@@ -264,15 +268,105 @@ log "Cmdline: \$(cat /proc/cmdline 2>/dev/null || true)"
 EOF_S10
 chmod 0755 /etc/mujina/rc.d/S10-hostname
 
+cat >/etc/mujina/rc.d/S15-finalize-env <<'EOF_S15'
+#!/bin/sh
+set -eu
+. /etc/mujina/lib.sh
+
+RUNTIME_ENV=/etc/mujina/finalize/runtime_nand_env.bin
+READY_MARKER=/etc/mujina/finalize/runtime_nand_env.ready
+STATE_DIR=/var/lib/mujina
+STATE_FILE=\${STATE_DIR}/finalize-env.done
+
+case " \$(cat /proc/cmdline 2>/dev/null || true) " in
+  *" mujina.finalize=1 "*)
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+
+[ -f "\${RUNTIME_ENV}" ] || {
+  log "Finalize env skipped: missing \${RUNTIME_ENV}"
+  exit 0
+}
+
+mkdir -p "\${STATE_DIR}"
+
+current_hash() {
+  cksum "\$1" 2>/dev/null | awk '{print \$1 ":" \$2}'
+}
+
+runtime_hash="\$(current_hash "\${RUNTIME_ENV}" || true)"
+live_tmp=/run/live-nand-env.bin
+dd if=/dev/nand_env of="\${live_tmp}" bs=65536 count=1 >/dev/null 2>&1 || true
+live_hash="\$(current_hash "\${live_tmp}" || true)"
+rm -f "\${live_tmp}"
+
+if [ -f "\${STATE_FILE}" ] && [ "\${live_hash}" = "\${runtime_hash}" ]; then
+  log "Finalize env already completed"
+  exit 0
+fi
+
+log "Finalizing nand_env from \${RUNTIME_ENV}"
+dd if="\${RUNTIME_ENV}" of=/dev/nand_env bs=65536 count=1 conv=fsync >/dev/null 2>&1
+sync
+printf '%s\n' "\${runtime_hash}" > "\${STATE_FILE}"
+touch "\${READY_MARKER}"
+log "nand_env finalized; rebooting"
+/sbin/reboot >/dev/null 2>&1 || /bin/busybox reboot >/dev/null 2>&1 || reboot >/dev/null 2>&1 || true
+sleep 5
+log "Finalize env reboot command returned unexpectedly"
+exit 0
+EOF_S15
+chmod 0755 /etc/mujina/rc.d/S15-finalize-env
+
 cat >/etc/mujina/rc.d/S20-network <<'EOF_S20'
 #!/bin/sh
 set -eu
 . /etc/mujina/lib.sh
 
+pick_iface() {
+  for path in /sys/class/net/*; do
+    [ -e "$path" ] || continue
+    iface="${path##*/}"
+    case "$iface" in
+      lo|sit0|tunl0|ip6tnl0) continue ;;
+    esac
+    devpath="$($BB readlink -f "$path/device" 2>/dev/null || true)"
+    case "$devpath" in
+      *usb*|*xhci-hcd*|*dwc3*)
+        echo "$iface"
+        return 0
+        ;;
+    esac
+  done
+
+  if [ -d /sys/class/net/eth0 ]; then
+    echo eth0
+    return 0
+  fi
+
+  for path in /sys/class/net/*; do
+    [ -e "$path" ] || continue
+    iface="${path##*/}"
+    case "$iface" in
+      lo|sit0|tunl0|ip6tnl0) continue ;;
+    esac
+    echo "$iface"
+    return 0
+  done
+
+  return 1
+}
+
 \$BB ifconfig lo 127.0.0.1 up 2>/dev/null || true
-\$BB ifconfig eth0 up 2>/dev/null || true
-log "Requesting DHCP on eth0"
-\$BB udhcpc -i eth0 -s /etc/udhcpc.script -b -x hostname:${HOSTNAME_VALUE}
+IFACE="$(pick_iface || true)"
+[ -n "${IFACE}" ] || exit 0
+
+\$BB ifconfig "${IFACE}" up 2>/dev/null || true
+log "Requesting DHCP on ${IFACE}"
+\$BB udhcpc -i "${IFACE}" -s /etc/udhcpc.script -b -x hostname:${HOSTNAME_VALUE}
 EOF_S20
 chmod 0755 /etc/mujina/rc.d/S20-network
 
@@ -341,6 +435,24 @@ printf '%s\n' "${HOSTNAME_VALUE}" > "${ROOTFS_DIR}/etc/hostname"
 mkdir -p "${ROOTFS_DIR}/sbin"
 ln -sfn ../bin/busybox "${ROOTFS_DIR}/sbin/init"
 
+python3 "${ENV_GENERATOR}" \
+  --template "${ENV_TEMPLATE}" \
+  --output "${RUNTIME_ENV}" \
+  --boot-mode stock-boot \
+  --volume-name mujina_rootfs \
+  --mtd-index 6
+
+python3 "${ENV_GENERATOR}" \
+  --template "${ENV_TEMPLATE}" \
+  --output "${STAGING_ENV}" \
+  --boot-mode stock-boot \
+  --volume-name mujina_rootfs \
+  --mtd-index 6 \
+  --extra-bootargs "${FINALIZE_FLAG}"
+
+mkdir -p "${FINALIZE_DIR}"
+cp "${RUNTIME_ENV}" "${FINALIZE_DIR}/runtime_nand_env.bin"
+
 rm -rf "${OUT_PAYLOAD}"
 mkdir -p "${OUT_PAYLOAD}"
 
@@ -350,19 +462,17 @@ docker run --rm \
   ubuntu:22.04 \
   bash -lc 'set -euo pipefail; cd /src; tar --format=ustar --numeric-owner --owner=0 --group=0 -czf /out/rootfs.tar.gz .'
 
-python3 "${ENV_GENERATOR}" \
-  --template "${ENV_TEMPLATE}" \
-  --output "${OUT_PAYLOAD}/nand_env.bin" \
-  --boot-mode stock-boot \
-  --volume-name mujina_rootfs \
-  --mtd-index 6
+cp "${STAGING_ENV}" "${OUT_PAYLOAD}/nand_env.bin"
+cp "${RUNTIME_ENV}" "${OUT_PAYLOAD}/runtime_nand_env.bin"
 
 cat > "${OUT_PAYLOAD}/manifest.txt" <<EOF
 boot_mode=stock-boot
+boot_phase=staging-then-runtime
 boot_source=stock signed boot image + mujina_rootfs on mtd6
 kernel_source=stock-bitmain-4.9.113
 dtb_source=stock-bitmain
 rootfs_source=debian-bookworm-armhf-with-busybox-init
+finalize_flag=${FINALIZE_FLAG}
 hostname=${HOSTNAME_VALUE}
 profile_name=${PROFILE_NAME}
 version=${VERSION_VALUE}
@@ -376,7 +486,7 @@ EOF
 
 (
   cd "${OUT_PAYLOAD}"
-  shasum -a 256 rootfs.tar.gz nand_env.bin manifest.txt > SHA256SUMS
+  shasum -a 256 rootfs.tar.gz nand_env.bin runtime_nand_env.bin manifest.txt > SHA256SUMS
 )
 
 echo "Built ${OUT_PAYLOAD}"

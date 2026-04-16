@@ -325,6 +325,24 @@ When we flash a stock-signed image with this repo's USB burn workflow:
 - `nvdata` is replaced with our generated Mujina UBI image.
 - `nand_env` is rewritten afterward by `env import` + `save`, outside the packed partition image itself.
 
+Observed limitation from the removable-media burn path:
+
+- adding `nenv.PARTITION` with `sub_type="nenv"` to the packed image does not
+  work on this board
+- the Amlogic `optimus_sdc_burn` path fails with `device(nenv) is err` and
+  aborts the burn
+- so `nand_env` must still be updated through a separate path after the image
+  flash
+
+Observed recovery behavior after a failed burn:
+
+- a failed `nenv` removable-media burn left NAND without a valid FIP header
+- BL2 then looped on `FIP HDR CHK: ffffffff`
+- in that state the board did not enumerate automatically in USB burn mode
+- shorting `JP2` during power-on did force USB burn-mode enumeration again, and
+  the board was recovered with the stock signed image from
+  `tools/stock_fw_restore/`
+
 ### Current Best Interpretation Of `bootloader` vs `tpl`
 
 - `bootloader` should be treated as containing the critical secure early boot content, at least the material needed for `BL2` and FIP/BL3x handoff.

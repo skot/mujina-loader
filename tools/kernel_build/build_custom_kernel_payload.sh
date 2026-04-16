@@ -54,6 +54,7 @@ need_cmd python3
 need_cmd shasum
 
 [[ -f "${BASE_PAYLOAD_DIR}/rootfs.tar.gz" ]] || die "Missing base rootfs archive: ${BASE_PAYLOAD_DIR}/rootfs.tar.gz"
+[[ -f "${BASE_PAYLOAD_DIR}/runtime_nand_env.bin" ]] || die "Missing base runtime env blob: ${BASE_PAYLOAD_DIR}/runtime_nand_env.bin"
 [[ -f "${KERNEL_IMAGE}" ]] || die "Missing kernel image: ${KERNEL_IMAGE}"
 [[ -f "${DTB_PATH}" ]] || die "Missing DTB: ${DTB_PATH}"
 [[ -f "${ENV_TEMPLATE}" ]] || die "Missing env template: ${ENV_TEMPLATE}"
@@ -63,6 +64,7 @@ rm -rf "${OUT_DIR}"
 mkdir -p "${OUT_DIR}"
 
 cp "${BASE_PAYLOAD_DIR}/rootfs.tar.gz" "${OUT_DIR}/rootfs.tar.gz"
+cp "${BASE_PAYLOAD_DIR}/runtime_nand_env.bin" "${OUT_DIR}/runtime_nand_env.bin"
 cp "${KERNEL_IMAGE}" "${OUT_DIR}/Image"
 cp "${DTB_PATH}" "${OUT_DIR}/$(basename "${DTB_PATH}")"
 
@@ -80,6 +82,7 @@ kernel_image=Image
 dtb_file=$(basename "${DTB_PATH}")
 rootfs_archive=rootfs.tar.gz
 env_blob=nand_env.bin
+runtime_env_blob=runtime_nand_env.bin
 base_payload_dir=${BASE_PAYLOAD_DIR}
 volume_name=${VOLUME_NAME}
 mtd_index=${MTD_INDEX}
@@ -87,7 +90,7 @@ EOF
 
 (
   cd "${OUT_DIR}"
-  shasum -a 256 rootfs.tar.gz Image "$(basename "${DTB_PATH}")" nand_env.bin manifest.txt > SHA256SUMS
+  shasum -a 256 rootfs.tar.gz runtime_nand_env.bin Image "$(basename "${DTB_PATH}")" nand_env.bin manifest.txt > SHA256SUMS
 )
 
 echo "Built ${OUT_DIR}"

@@ -13,8 +13,14 @@ OUTPUT_DIR="${OUTPUT_DIR:-${SCRIPT_DIR}/output}"
 OUTPUT_IMAGE="${OUTPUT_IMAGE:-${OUTPUT_DIR}/aml_upgrade_package_mujina_armhf_base.img}"
 OUTPUT_ENV_TEXT="${OUTPUT_ENV_TEXT:-${OUTPUT_DIR}/mujina-uboot-env.txt}"
 OUTPUT_ENV_BIN="${OUTPUT_ENV_BIN:-${OUTPUT_DIR}/nand_env.bin}"
+OUTPUT_RUNTIME_ENV_BIN="${OUTPUT_RUNTIME_ENV_BIN:-${OUTPUT_DIR}/runtime_nand_env.bin}"
+BOOT_HELPER_SCRIPT="${BOOT_HELPER_SCRIPT:-${SCRIPT_DIR}/build_boot_handoff_partition.sh}"
+BOOT_HELPER_IMAGE="${BOOT_HELPER_IMAGE:-${OUTPUT_DIR}/boot.PARTITION}"
+BOOT_HELPER_MANIFEST="${BOOT_HELPER_MANIFEST:-${OUTPUT_DIR}/boot-helper-manifest.txt}"
 VOLUME_NAME="${VOLUME_NAME:-mujina_rootfs}"
 MTD_INDEX="${MTD_INDEX:-6}"
+INCLUDE_NENV_PARTITION="${INCLUDE_NENV_PARTITION:-0}"
+REPLACE_BOOT_WITH_HELPER="${REPLACE_BOOT_WITH_HELPER:-0}"
 MIN_IO_SIZE="${MIN_IO_SIZE:-2048}"
 SUB_PAGE_SIZE="${SUB_PAGE_SIZE:-2048}"
 PEB_SIZE="${PEB_SIZE:-131072}"
@@ -29,6 +35,8 @@ TEMPLATE_FILE="${SCRIPT_DIR}/ubinize-nvdata.ini.in"
 IMAGE_CFG="${UNPACK_DIR}/image.cfg"
 NV_PARTITION_NAME="nvdata.PARTITION"
 OUTPUT_NV_PARTITION="${OUTPUT_DIR}/${NV_PARTITION_NAME}"
+ENV_PARTITION_NAME="nenv.PARTITION"
+OUTPUT_ENV_PARTITION="${OUTPUT_DIR}/${ENV_PARTITION_NAME}"
 
 find_payload_dtb() {
   local count
@@ -81,7 +89,11 @@ verify_inputs() {
   [[ -f "${PAYLOAD_DIR}/rootfs.tar.gz" ]] || die "Missing payload rootfs: ${PAYLOAD_DIR}/rootfs.tar.gz"
   [[ -f "${ENV_TEMPLATE}" ]] || die "Missing env template: ${ENV_TEMPLATE}"
   [[ -f "${ENV_GENERATOR}" ]] || die "Missing env generator: ${ENV_GENERATOR}"
+  [[ -f "${PAYLOAD_DIR}/runtime_nand_env.bin" ]] || die "Missing payload runtime env: ${PAYLOAD_DIR}/runtime_nand_env.bin"
   [[ -f "${TEMPLATE_FILE}" ]] || die "Missing ubinize template: ${TEMPLATE_FILE}"
+  if [[ "${REPLACE_BOOT_WITH_HELPER}" == "1" ]]; then
+    [[ -x "${BOOT_HELPER_SCRIPT}" ]] || die "Missing boot helper builder: ${BOOT_HELPER_SCRIPT}"
+  fi
   need_cmd docker
   need_cmd shasum
   need_cmd sed
@@ -149,11 +161,23 @@ patch_image_cfg() {
   [[ -f "${IMAGE_CFG}" ]] || die "Missing unpacked image.cfg at ${IMAGE_CFG}"
   if rg -q 'sub_type="nvdata"' "${IMAGE_CFG}"; then
     echo "image.cfg already contains nvdata partition entry"
-    return
-  fi
-  cat >> "${IMAGE_CFG}" <<EOF
+  else
+    cat >> "${IMAGE_CFG}" <<EOF
 file="${NV_PARTITION_NAME}"		main_type="PARTITION"		sub_type="nvdata"	file_type="normal"
 EOF
+  fi
+
+  if [[ "${INCLUDE_NENV_PARTITION}" == "1" ]] && ! rg -q 'sub_type="nenv"' "${IMAGE_CFG}"; then
+    cat >> "${IMAGE_CFG}" <<EOF
+file="${ENV_PARTITION_NAME}"		main_type="PARTITION"		sub_type="nenv"	file_type="normal"
+EOF
+  fi
+}
+
+inject_boot_helper() {
+  "${BOOT_HELPER_SCRIPT}"
+  [[ -f "${BOOT_HELPER_IMAGE}" ]] || die "Missing generated boot helper image: ${BOOT_HELPER_IMAGE}"
+  cp "${BOOT_HELPER_IMAGE}" "${UNPACK_DIR}/boot.PARTITION"
 }
 
 generate_env_artifacts() {
@@ -178,6 +202,8 @@ generate_env_artifacts() {
     env_args+=(--dtb-filename "${payload_dtb_name}")
   fi
   python3 "${ENV_GENERATOR}" "${env_args[@]}"
+  cp "${OUTPUT_ENV_BIN}" "${OUTPUT_ENV_PARTITION}"
+  cp "${PAYLOAD_DIR}/runtime_nand_env.bin" "${OUTPUT_RUNTIME_ENV_BIN}"
 
   if [[ "${boot_mode}" == "ubifs-image" ]]; then
     cat > "${OUTPUT_ENV_TEXT}" <<EOF
@@ -218,6 +244,8 @@ base_image=${STOCK_IMAGE}
 payload_dir=${PAYLOAD_DIR}
 boot_mode=${boot_mode}
 boot_source=${kernel_mode}
+include_nenv_partition=${INCLUDE_NENV_PARTITION}
+replace_boot_with_helper=${REPLACE_BOOT_WITH_HELPER}
 rootfs_partition=nvdata (mtd${MTD_INDEX})
 rootfs_volume=${VOLUME_NAME}
 partition_size=${PARTITION_SIZE}
@@ -228,6 +256,10 @@ max_leb_cnt=$(calc_max_leb_cnt)
 nvdata_partition_file=${NV_PARTITION_NAME}
 env_text_file=$(basename "${OUTPUT_ENV_TEXT}")
 env_bin_file=$(basename "${OUTPUT_ENV_BIN}")
+runtime_env_bin_file=$(basename "${OUTPUT_RUNTIME_ENV_BIN}")
+boot_helper_image=$([[ "${REPLACE_BOOT_WITH_HELPER}" == "1" ]] && basename "${BOOT_HELPER_IMAGE}" || echo disabled)
+boot_helper_manifest=$([[ "${REPLACE_BOOT_WITH_HELPER}" == "1" ]] && basename "${BOOT_HELPER_MANIFEST}" || echo disabled)
+env_partition_file=$([[ "${INCLUDE_NENV_PARTITION}" == "1" ]] && echo "${ENV_PARTITION_NAME}" || echo disabled)
 payload_kernel_present=$([[ -f "${PAYLOAD_DIR}/Image" ]] && echo yes || echo no)
 payload_dtb_file=${payload_dtb_name:-none}
 EOF
@@ -239,6 +271,9 @@ EOF
       "${NV_PARTITION_NAME}" \
       "$(basename "${OUTPUT_ENV_TEXT}")" \
       "$(basename "${OUTPUT_ENV_BIN}")" \
+      "$(basename "${OUTPUT_RUNTIME_ENV_BIN}")" \
+      $([[ "${REPLACE_BOOT_WITH_HELPER}" == "1" ]] && printf '%q ' "$(basename "${BOOT_HELPER_MANIFEST}")") \
+      $([[ "${INCLUDE_NENV_PARTITION}" == "1" ]] && printf '%q ' "${ENV_PARTITION_NAME}") \
       manifest.txt > SHA256SUMS
   )
 }
@@ -250,6 +285,10 @@ validate_output_layout() {
   "${PACKER}" -d "${OUTPUT_IMAGE}" "${validate_dir}" >/dev/null
   rg -q 'sub_type="nvdata"' "${validate_dir}/image.cfg" || die "Repacked image is missing nvdata entry"
   [[ -f "${validate_dir}/${NV_PARTITION_NAME}" ]] || die "Repacked image is missing ${NV_PARTITION_NAME}"
+  if [[ "${INCLUDE_NENV_PARTITION}" == "1" ]]; then
+    rg -q 'sub_type="nenv"' "${validate_dir}/image.cfg" || die "Repacked image is missing nenv entry"
+    [[ -f "${validate_dir}/${ENV_PARTITION_NAME}" ]] || die "Repacked image is missing ${ENV_PARTITION_NAME}"
+  fi
 }
 
 clean_output_dir() {
@@ -257,8 +296,12 @@ clean_output_dir() {
   rm -f \
     "${OUTPUT_DIR}"/aml_upgrade_package_mujina_*.img \
     "${OUTPUT_DIR}/${NV_PARTITION_NAME}" \
+    "${OUTPUT_DIR}/${ENV_PARTITION_NAME}" \
+    "${OUTPUT_DIR}/boot.PARTITION" \
+    "${OUTPUT_DIR}/boot-helper-manifest.txt" \
     "${OUTPUT_DIR}/mujina-uboot-env.txt" \
     "${OUTPUT_DIR}/nand_env.bin" \
+    "${OUTPUT_DIR}/runtime_nand_env.bin" \
     "${OUTPUT_DIR}/manifest.txt" \
     "${OUTPUT_DIR}/SHA256SUMS"
 }
@@ -280,6 +323,14 @@ main() {
 
   echo "Generating Mujina boot env artifacts..."
   generate_env_artifacts
+  if [[ "${INCLUDE_NENV_PARTITION}" == "1" ]]; then
+    cp "${OUTPUT_ENV_PARTITION}" "${UNPACK_DIR}/${ENV_PARTITION_NAME}"
+  fi
+
+  if [[ "${REPLACE_BOOT_WITH_HELPER}" == "1" ]]; then
+    echo "Replacing boot.PARTITION with first-boot env handoff helper..."
+    inject_boot_helper
+  fi
 
   echo "Repacking stock-signed Mujina image..."
   repack_image

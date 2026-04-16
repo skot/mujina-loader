@@ -20,7 +20,8 @@ def parse_env_text(path: Path) -> dict[str, str]:
     return env
 
 
-def build_mujinaboot_ubifs_image(volume: str, mtd_index: int, dtb_filename: str) -> str:
+def build_mujinaboot_ubifs_image(volume: str, mtd_index: int, dtb_filename: str, extra_bootargs: str = "") -> str:
+    extra = f" {extra_bootargs.strip()}" if extra_bootargs.strip() else ""
     return (
         f"ubi part nvdata; "
         f"ubifsmount ubi0:{volume}; "
@@ -28,16 +29,17 @@ def build_mujinaboot_ubifs_image(volume: str, mtd_index: int, dtb_filename: str)
         f"ubifsload ${{dtb_addr}} {dtb_filename}; "
         f"setenv bootargs \"init=/sbin/init console=ttyS0,115200 "
         f"no_console_suspend earlycon=aml_uart,0xff803000 jtag=disable "
-        f"root=ubi0:{volume} rootfstype=ubifs rw ubi.mtd={mtd_index},2048\"; "
+        f"root=ubi0:{volume} rootfstype=ubifs rw ubi.mtd={mtd_index},2048{extra}\"; "
         f"booti ${{ker_addr}} - ${{dtb_addr}}"
     )
 
 
-def build_mujinaboot_stock_boot(volume: str, mtd_index: int) -> str:
+def build_mujinaboot_stock_boot(volume: str, mtd_index: int, extra_bootargs: str = "") -> str:
+    extra = f" {extra_bootargs.strip()}" if extra_bootargs.strip() else ""
     return (
         "run storeargs; "
         f"setenv bootargs ${{bootargs}} root=ubi0:{volume} rootfstype=ubifs rw "
-        f"ubi.mtd={mtd_index},2048 init=/sbin/init skip_initramfs; "
+        f"ubi.mtd={mtd_index},2048 init=/sbin/init skip_initramfs{extra}; "
         "if imgread kernel ${boot_part} ${loadaddr}; then bootm ${loadaddr}; fi"
     )
 
@@ -61,6 +63,7 @@ def main() -> None:
     parser.add_argument("--boot-mode", choices=("ubifs-image", "stock-boot"), default="ubifs-image", help="How mujinaboot should load the kernel")
     parser.add_argument("--mtd-index", type=int, default=6, help="MTD index backing the Mujina UBI volume")
     parser.add_argument("--dtb-filename", default="axg_s400_antminer.dtb", help="DTB filename when booting Image+DTB from UBIFS")
+    parser.add_argument("--extra-bootargs", default="", help="Extra kernel command-line arguments to append in mujinaboot")
     parser.add_argument("--env-size", type=lambda x: int(x, 0), default=0x10000, help="nand_env size in bytes")
     parser.add_argument("--crc-endian", choices=("little", "big"), default="little", help="CRC endianness in the nand_env header")
     args = parser.parse_args()
@@ -69,9 +72,9 @@ def main() -> None:
     env["ker_addr"] = env.get("ker_addr", "1080000")
     env["dtb_addr"] = env.get("dtb_addr", "1000000")
     if args.boot_mode == "stock-boot":
-        env["mujinaboot"] = build_mujinaboot_stock_boot(args.volume_name, args.mtd_index)
+        env["mujinaboot"] = build_mujinaboot_stock_boot(args.volume_name, args.mtd_index, args.extra_bootargs)
     else:
-        env["mujinaboot"] = build_mujinaboot_ubifs_image(args.volume_name, args.mtd_index, args.dtb_filename)
+        env["mujinaboot"] = build_mujinaboot_ubifs_image(args.volume_name, args.mtd_index, args.dtb_filename, args.extra_bootargs)
     env["bootcmd"] = "run mujinaboot || run storeboot"
 
     blob = render_env(env, args.env_size, args.crc_endian)

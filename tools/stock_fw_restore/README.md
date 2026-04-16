@@ -68,6 +68,53 @@ set CFG
 
 That is enough to get this board back to stock boot behavior.
 
+## JP2 Unbrick Recovery
+
+We also hit a hard-failure case where a bad removable-media burn left the board
+unable to boot U-Boot at all. The serial console showed BL2 repeatedly trying
+to load the NAND FIP header and failing with:
+
+```text
+Load FIP HDR from NAND, src: 0x0000c000, des: 0x01700000, size: 0x00004000, part: 0
+FIP HDR CHK: ffffffff ADDR 0x01700000
+...
+reset...
+```
+
+In that state:
+
+- the board did not enumerate automatically in Amlogic USB burn mode
+- `./detect_amlogic_usb.sh` printed nothing
+- normal `run usb_burning` recovery was impossible because U-Boot never started
+
+The recovery that worked on this board was:
+
+1. Power the board off.
+2. Connect the micro-USB port to the Mac with a known-good data cable.
+3. Short `JP2`.
+4. Apply power while `JP2` is still shorted.
+5. Check for the Amlogic USB burn device:
+
+```bash
+./detect_amlogic_usb.sh
+```
+
+Or directly:
+
+```bash
+./tools/macos/update identify 7
+```
+
+6. Once the board enumerates, run the stock restore:
+
+```bash
+./flash_stock_s21_aml_macos.sh
+```
+
+This confirmed that `JP2` is a practical unbrick/recovery trigger for this
+control board when NAND boot metadata is damaged badly enough that the normal
+USB burn path does not appear by itself.
+
 ## Prerequisites
 
 - macOS
@@ -106,6 +153,9 @@ update 1000
    On the board tested here, `usb_burning=update 1000` in the stock U-Boot env,
    and forcing that command path was enough to make the board enumerate again in
    Amlogic USB burn mode.
+   If the board never reaches U-Boot and BL2 keeps resetting while failing FIP
+   header checks, use the `JP2` hardware recovery procedure above to force USB
+   burn-mode enumeration.
 2. Confirm macOS sees the Amlogic device:
 
 ```bash
@@ -140,3 +190,6 @@ Or directly:
 - `--wipe` and the flashcard package reset the board much more aggressively
   than the stock `.bmu` web updater path.
 - Because the board is secure, using the encrypted image matters.
+- A failed removable-media burn can leave the NAND FIP invalid enough that the
+  board no longer enumerates automatically in USB burn mode. Keep UART attached
+  and be prepared to use `JP2` to recover.

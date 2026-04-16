@@ -8,6 +8,8 @@ The current release path is:
 - keep the stock signed Bitmain boot chain and stock `4.9.113` kernel
 - replace `mtd6` / `nvdata` with a Mujina UBIFS rootfs
 - boot that Mujina rootfs from `mtd6`
+- use a staging `nand_env` on the first Mujina boot, then self-finalize to a
+  steady-state `nand_env` and reboot once
 
 This directory now focuses on building the release image:
 
@@ -58,6 +60,8 @@ Builds the first release-oriented base profile:
 - HTTP disabled
 - release metadata in `/etc/mujina/release`
 - service ownership in `/etc/mujina/services.env`
+- first-boot `nand_env` finalizer in `/etc/mujina/rc.d/S15-finalize-env`
+- `runtime_nand_env.bin` embedded into the rootfs under `/etc/mujina/finalize/`
 
 Default output:
 

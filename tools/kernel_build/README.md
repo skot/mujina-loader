@@ -23,6 +23,12 @@ release model:
 - `build_custom_kernel.sh`
   - builds an arm64 Amlogic 4.9 kernel in Docker and writes outputs under
     `output/`
+- `build_known_good_ecm_kernel.sh`
+  - builds the minimal GT Touch ECM experiment kernel from the exact
+    `amlogic-cb-tools` baseline config copied into this repo, with only
+    `USB_NET_DRIVERS`, `USB_USBNET`, and `USB_NET_CDCETHER` enabled
+  - uses a fresh kernel clone on every run and fails if the final config
+    contains broader USB-net, WLAN, cfg80211, or rfkill options
 - `build_custom_kernel_payload.sh`
   - combines `mujina_armhf_base` with the custom `Image` and companion DTB
     into a custom-kernel payload directory
@@ -57,6 +63,28 @@ Build a custom-kernel payload:
 cd tools/kernel_build
 ./build_custom_kernel_payload.sh
 ```
+
+Build the minimal known-good-plus-ECM experiment kernel:
+
+```bash
+cd tools/kernel_build
+./build_known_good_ecm_kernel.sh
+```
+
+That builder is intentionally strict. It verifies the post-`olddefconfig`
+result before compiling and only succeeds when the final config is:
+
+- required:
+  `CONFIG_USB_NET_DRIVERS=y`
+  `CONFIG_USB_USBNET=y`
+  `CONFIG_USB_NET_CDCETHER=y`
+- forbidden:
+  `CONFIG_USB_NET_CDC_EEM`
+  `CONFIG_USB_NET_CDC_NCM`
+  `CONFIG_USB_NET_RNDIS_HOST`
+  `CONFIG_WLAN`
+  `CONFIG_CFG80211`
+  `CONFIG_RFKILL`
 
 ## Install On A Running Board
 
