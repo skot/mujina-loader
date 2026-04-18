@@ -12,6 +12,7 @@ This directory contains the release-facing deployment and recovery tooling.
   - seeded from the known-good `amlogic-cb-tools` kernel workflow
 - `mujina-usburner/`
   - builds and flashes direct USB burn images for Mujina
+  - includes a wrapper for the sibling `amlogic-cb-tools` custom-kernel path
 - `stock_fw_restore/`
   - restores a board back to stock firmware over USB burn
 

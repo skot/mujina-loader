@@ -13,6 +13,13 @@ The current proven workflow is:
 
 This does not try to replace the secure boot chain with custom signed blobs.
 
+There is also a custom-kernel variant for the known-good artifacts from the
+sibling `amlogic-cb-tools` workspace:
+
+- keep the stock signed boot chain and USB burn image format
+- embed `Image` and the companion `.dtb` into the Mujina `nvdata` payload
+- generate a matching `nand_env.bin` that boots the kernel from UBIFS
+
 ## What this builds
 
 - a stock-signed Amlogic USB burn image
@@ -105,6 +112,60 @@ Other useful overrides:
 - `PARTITION_SIZE`
 - `UBI_RESERVED_PEBS`
 
+### Build An Image With The Sibling `amlogic-cb-tools` Kernel
+
+If you want the USB burn image to boot the validated custom kernel artifacts
+from `../amlogic-cb-tools/usb/bin`, use the dedicated wrapper:
+
+```bash
+cd tools/mujina-usburner
+./build_amlogic_cb_tools_signed_mujina_image.sh
+```
+
+Flash that image with:
+
+```bash
+cd tools/mujina-usburner
+./flash_amlogic_cb_tools_signed_mujina_image.sh
+```
+
+By default it uses:
+
+- kernel:
+  `../../amlogic-cb-tools/usb/bin/Image-usb-storage`
+- DTB:
+  `../../amlogic-cb-tools/usb/bin/axg_s400_antminer.usb-host-nand-clocks.dtb`
+- base rootfs payload:
+  `../../mujina_loader/mujina_armhf_base`
+
+That wrapper first prepares a custom payload with:
+
+- `rootfs.tar.gz`
+- `Image`
+- companion `.dtb`
+- matching `nand_env.bin`
+
+and then hands that payload to `build_stock_signed_mujina_image.sh`.
+
+Default outputs:
+
+- prepared payload:
+  `output/mujina_armhf_amlogic_cb_tools/`
+- burn image:
+  `output/amlogic_cb_tools/aml_upgrade_package_mujina_amlogic_cb_tools.img`
+- env reference:
+  `output/amlogic_cb_tools/mujina-uboot-env-amlogic-cb-tools.txt`
+- env blob:
+  `output/amlogic_cb_tools/nand_env-amlogic-cb-tools.bin`
+
+You can override the defaults with:
+
+- `--kernel-image`
+- `--dtb`
+- `--base-payload-dir`
+- `--output-dir`
+- `--output-image`
+
 ## Enter USB Burn Mode
 
 1. Unplug the Amlogic control board power
@@ -175,6 +236,7 @@ update 1000
 - This workflow currently targets the proven stock-kernel Mujina path.
 - It preinstalls Mujina onto `mtd6` as a UBI image with the volume name
   `mujina_rootfs`.
-- It does not currently attempt to flash a custom kernel or DTB via USB burn.
+- The custom-kernel variant still keeps the stock signed boot chain; it places
+  the custom `Image` and `.dtb` inside `nvdata` and boots them from UBIFS.
 - The generated `output/mujina-uboot-env.txt` is now mainly a reference file;
   the flasher uses `output/nand_env.bin` for the actual U-Boot import step.

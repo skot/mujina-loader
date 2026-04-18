@@ -99,12 +99,19 @@ chmod 0755 /usr/sbin/policy-rc.d
 apt-get update >/dev/null
 apt-get install -y --no-install-recommends \
   bash busybox-static ca-certificates coreutils curl dropbear-bin file \
-  findutils grep gawk iproute2 iputils-ping less nano net-tools procps \
-  sed tar tzdata util-linux vim-tiny wget >/dev/null
+  findutils grep gawk iproute2 iputils-ping kmod less nano net-tools procps \
+  sed tar tzdata util-linux vim-tiny wget wpasupplicant >/dev/null
 
 echo 'root:${ROOT_PASSWORD}' | chpasswd
-mkdir -p /etc/dropbear /etc/init.d /etc/mujina/rc.d /root /run /var/log /var/volatile /www /dev/pts /tmp
+mkdir -p /config /etc/dropbear /etc/init.d /etc/mujina/rc.d /etc/udhcpc /root /run /usr/local/bin /var/log /var/volatile /www /dev/pts /tmp
 chmod 1777 /tmp
+
+for tool in wpa_supplicant wpa_cli wpa_passphrase; do
+  tool_path="$(command -v "${tool}" || true)"
+  [ -n "${tool_path}" ] && ln -sf "${tool_path}" "/usr/local/bin/${tool}"
+done
+ln -sf /bin/busybox /sbin/udhcpc
+ln -sf /bin/busybox /usr/sbin/udhcpc
 
 cat >/etc/motd <<'EOF_MOTD'
 ${PROFILE_NAME}
@@ -149,6 +156,7 @@ set -eu
 BB=/bin/busybox
 SERIAL=/dev/ttyS0
 WWW=/www/index.html
+PUBLIC_DNS_FALLBACKS="1.1.1.1 8.8.8.8"
 
 log() {
   echo "\$*" >&2
@@ -170,8 +178,16 @@ case "\${1:-}" in
         break
       done
     fi
+    if [ "\${interface}" = "wlan0" ]; then
+      ip route del default dev eth0 2>/dev/null || true
+    fi
     : > /etc/resolv.conf
+    for d in \$PUBLIC_DNS_FALLBACKS; do
+      echo "nameserver \$d" >> /etc/resolv.conf
+    done
     for d in \${dns:-}; do
+      [ "\$d" = "1.1.1.1" ] && continue
+      [ "\$d" = "8.8.8.8" ] && continue
       echo "nameserver \$d" >> /etc/resolv.conf
     done
     cat >"\${WWW}" <<HTML
@@ -198,6 +214,207 @@ esac
 exit 0
 EOF_UDHCPC
 chmod 0755 /etc/udhcpc.script
+ln -sf /etc/udhcpc.script /etc/udhcpc/default.script
+
+cat >/etc/init.d/wifi-autostart <<'EOF_WIFI'
+#!/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LD_LIBRARY_PATH=/lib
+
+WIFI_IFACE=wlan0
+WIFI_CONFIG_PATH=
+WIFI_ROUTE_TABLE=101
+ETH_IFACE=eth0
+USB_WIFI_ID=
+
+if [ -f /config/wifi-autostart.conf ]; then
+  . /config/wifi-autostart.conf
+fi
+
+if [ -z "$WIFI_CONFIG_PATH" ]; then
+  WIFI_CONFIG_PATH="/config/wpa_supplicant-$WIFI_IFACE.conf"
+fi
+
+WPA_PID="/var/run/wpa_supplicant-$WIFI_IFACE.pid"
+DHCP_PID="/var/run/udhcpc.$WIFI_IFACE.pid"
+MODULE_PATH="/lib/modules/$(uname -r)/kernel/drivers/net/wireless/realtek/rtl8821cu/8821cu.ko"
+MODULE_PATH_ALT="/lib/modules/$(uname -r)/kernel/drivers/net/wireless/realtek/rtl8812au/88XXau.ko"
+
+log() {
+  echo "wifi-autostart: $*"
+}
+
+usb_wifi_id() {
+  if [ -n "$USB_WIFI_ID" ]; then
+    printf '%s\n' "$USB_WIFI_ID"
+    return 0
+  fi
+
+  for dev in /sys/bus/usb/devices/*; do
+    [ -f "$dev/idVendor" ] || continue
+    vendor=$(cat "$dev/idVendor" 2>/dev/null || true)
+    product=$(cat "$dev/idProduct" 2>/dev/null || true)
+    if [ -n "$vendor" ] && [ -n "$product" ]; then
+      printf '%s:%s\n' "$vendor" "$product"
+    fi
+  done
+}
+
+load_wifi_module() {
+  for id in $(usb_wifi_id); do
+    case "$id" in
+      2357:011e|2357:011f|2357:0120)
+        log "loading 88XXau for USB ID $id"
+        modprobe 88XXau >/dev/null 2>&1 || insmod "$MODULE_PATH_ALT" >/dev/null 2>&1 || true
+        return 0
+        ;;
+      0bda:c811|0bda:c82b|0bda:c82a|0bda:c820|0bda:c821|0bda:b820|0bda:b82b)
+        log "loading 8821cu for USB ID $id"
+        modprobe 8821cu >/dev/null 2>&1 || insmod "$MODULE_PATH" >/dev/null 2>&1 || true
+        return 0
+        ;;
+    esac
+  done
+
+  log "no known USB Wi-Fi ID found, trying 8821cu then 88XXau"
+  modprobe 8821cu >/dev/null 2>&1 || insmod "$MODULE_PATH" >/dev/null 2>&1 || true
+  modprobe 88XXau >/dev/null 2>&1 || insmod "$MODULE_PATH_ALT" >/dev/null 2>&1 || true
+}
+
+kill_pidfile() {
+  pidfile=$1
+  if [ -f "$pidfile" ]; then
+    kill "$(cat "$pidfile")" 2>/dev/null || true
+    rm -f "$pidfile"
+  fi
+}
+
+wait_for_iface() {
+  count=0
+  while [ "$count" -lt 20 ]; do
+    if ip link show "$WIFI_IFACE" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    count=$((count + 1))
+  done
+  return 1
+}
+
+wait_for_assoc() {
+  count=0
+  while [ "$count" -lt 20 ]; do
+    if wpa_cli -i "$WIFI_IFACE" status 2>/dev/null | grep -q '^wpa_state=COMPLETED$'; then
+      return 0
+    fi
+    sleep 1
+    count=$((count + 1))
+  done
+  return 1
+}
+
+apply_arp_policy() {
+  for key in all default "$ETH_IFACE" "$WIFI_IFACE"; do
+    [ -d "/proc/sys/net/ipv4/conf/$key" ] || continue
+    echo 1 > "/proc/sys/net/ipv4/conf/$key/arp_ignore"
+    echo 2 > "/proc/sys/net/ipv4/conf/$key/arp_announce"
+    echo 1 > "/proc/sys/net/ipv4/conf/$key/arp_filter"
+  done
+}
+
+apply_wifi_routing() {
+  wifi_cidr=$(ip -4 addr show dev "$WIFI_IFACE" | awk '/inet / {print $2; exit}')
+  [ -n "$wifi_cidr" ] || return 0
+
+  wifi_src=${wifi_cidr%/*}
+  wifi_subnet=$(ip -4 route show dev "$WIFI_IFACE" scope link | awk 'NR==1 {print $1; exit}')
+  wifi_gw=$(ip route show default | awk 'NR==1 {print $3; exit}')
+
+  ip rule del from "$wifi_src/32" table "$WIFI_ROUTE_TABLE" 2>/dev/null || true
+  ip route flush table "$WIFI_ROUTE_TABLE" 2>/dev/null || true
+
+  if [ -n "$wifi_subnet" ]; then
+    ip route add "$wifi_subnet" dev "$WIFI_IFACE" src "$wifi_src" table "$WIFI_ROUTE_TABLE"
+  fi
+
+  if [ -n "$wifi_gw" ]; then
+    ip route add default via "$wifi_gw" dev "$WIFI_IFACE" table "$WIFI_ROUTE_TABLE" 2>/dev/null || true
+  fi
+
+  ip rule add from "$wifi_src/32" table "$WIFI_ROUTE_TABLE" priority 10000 2>/dev/null || true
+  apply_arp_policy
+}
+
+cleanup_stale_eth_ipv4() {
+  carrier=$(cat "/sys/class/net/$ETH_IFACE/carrier" 2>/dev/null || echo 0)
+  if [ "$carrier" = "0" ]; then
+    ip -4 addr flush dev "$ETH_IFACE" scope global 2>/dev/null || true
+  fi
+}
+
+start_wifi() {
+  if [ ! -s "$WIFI_CONFIG_PATH" ]; then
+    log "skip: missing $WIFI_CONFIG_PATH"
+    return 0
+  fi
+
+  mkdir -p /var/run/wpa_supplicant
+  load_wifi_module
+
+  if ! wait_for_iface; then
+    log "skip: $WIFI_IFACE did not appear"
+    return 0
+  fi
+
+  kill_pidfile "$WPA_PID"
+  kill_pidfile "$DHCP_PID"
+  rm -f "/var/run/wpa_supplicant/$WIFI_IFACE"
+
+  ifconfig "$WIFI_IFACE" down >/dev/null 2>&1 || true
+  ifconfig "$WIFI_IFACE" up >/dev/null 2>&1 || true
+
+  wpa_supplicant -B -D nl80211,wext -i "$WIFI_IFACE" -c "$WIFI_CONFIG_PATH" -P "$WPA_PID"
+  wait_for_assoc || true
+  /bin/busybox udhcpc -n -q -t 10 -T 3 -p "$DHCP_PID" -i "$WIFI_IFACE" || true
+  apply_wifi_routing
+  cleanup_stale_eth_ipv4
+  log "$WIFI_IFACE ready"
+  return 0
+}
+
+stop_wifi() {
+  kill_pidfile "$DHCP_PID"
+  kill_pidfile "$WPA_PID"
+  rm -f "/var/run/wpa_supplicant/$WIFI_IFACE"
+  ip rule del priority 10000 2>/dev/null || true
+  ip route flush table "$WIFI_ROUTE_TABLE" 2>/dev/null || true
+  ifconfig "$WIFI_IFACE" down >/dev/null 2>&1 || true
+}
+
+case "${1:-start}" in
+  start)
+    start_wifi
+    ;;
+  stop)
+    stop_wifi
+    ;;
+  restart|force-reload)
+    stop_wifi
+    start_wifi
+    ;;
+  status)
+    wpa_cli -i "$WIFI_IFACE" status 2>/dev/null || true
+    ip route show table "$WIFI_ROUTE_TABLE" 2>/dev/null || true
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|restart|force-reload|status}" >&2
+    exit 2
+    ;;
+esac
+
+exit 0
+EOF_WIFI
+chmod 0755 /etc/init.d/wifi-autostart
 
 cat >/etc/mujina/lib.sh <<'EOF_LIB'
 #!/bin/sh
@@ -275,6 +492,8 @@ log "Requesting DHCP on eth0"
 \$BB udhcpc -i eth0 -s /etc/udhcpc.script -b -x hostname:${HOSTNAME_VALUE}
 EOF_S20
 chmod 0755 /etc/mujina/rc.d/S20-network
+
+ln -sf ../../init.d/wifi-autostart /etc/mujina/rc.d/S25-wifi-autostart
 
 cat >/etc/mujina/rc.d/S30-dropbear <<'EOF_S30'
 #!/bin/sh

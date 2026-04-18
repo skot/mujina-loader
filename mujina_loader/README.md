@@ -40,6 +40,14 @@ Builds a development-oriented userspace:
 - Dropbear SSH enabled
 - BusyBox telnet enabled
 - BusyBox HTTP status page enabled
+- generated `udhcpc` hook writes `1.1.1.1` and `8.8.8.8` into
+  `/etc/resolv.conf` before any DHCP-provided resolvers, so DNS still works if
+  the router advertises a flaky local resolver
+- generated image includes USB Wi-Fi userspace and boot hooks:
+  `wpasupplicant`, `wifi-autostart`, `/config/wpa_supplicant-wlan0.conf`
+  support, and a Mujina boot hook at `/etc/mujina/rc.d/S25-wifi-autostart`
+- the rootfs still requires a Wi-Fi-capable kernel plus the matching external
+  Realtek module (`88XXau.ko` or `8821cu.ko`) to actually expose `wlan0`
 
 Default output:
 
@@ -58,6 +66,8 @@ Builds the first release-oriented base profile:
 - HTTP disabled
 - release metadata in `/etc/mujina/release`
 - service ownership in `/etc/mujina/services.env`
+- same DNS fallback behavior in the generated `udhcpc` hook
+- same USB Wi-Fi userspace/autostart support as the full profile
 
 Default output:
 
