@@ -7,12 +7,15 @@ __pycache__/
 # Generated Mujina image artifacts
 /mujina_loader/mujina_armhf_base/
 /mujina_loader/mujina_armhf_full/
+/mujina_loader/mujina_armhf_s19jpro_amlogic/
+/mujina_loader/output/
 
 # Local Yocto/BSP worktree
 /yocto/
 
 # Generated stock-signed USB burn artifacts
 /tools/mujina-usburner/output/
+/tools/mujina-usburner/output-s19jpro/
 
 # Generated custom-kernel build artifacts
 /tools/kernel_build/output/

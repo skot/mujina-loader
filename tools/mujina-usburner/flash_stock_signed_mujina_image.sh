@@ -27,7 +27,7 @@ verify_inputs() {
   [[ -f "${ENV_BIN}" ]] || die "Missing env blob: ${ENV_BIN}"
   [[ -x "${FLASH_TOOL}" ]] || die "Missing flash-tool: ${FLASH_TOOL}"
   [[ -x "${UPDATE_BIN}" ]] || die "Missing update binary: ${UPDATE_BIN}"
-  [[ -e /usr/local/opt/libusb-compat/lib/libusb-0.1.4.dylib ]] || die "Missing libusb-compat. Run tools/stock_fw_restore/install_host_deps.sh first."
+  [[ -e /usr/local/opt/libusb-compat/lib/libusb-0.1.4.dylib || -e /opt/homebrew/opt/libusb-compat/lib/libusb-0.1.4.dylib ]] || die "Missing libusb-compat. Run tools/stock_fw_restore/install_host_deps.sh first."
   need_cmd awk
 }
 
