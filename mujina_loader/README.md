@@ -24,6 +24,12 @@ This directory now focuses on building the release image:
 - `build_armhf_base_payload.sh`
   - builds the first release-oriented `armhf` base profile with SSH enabled and
     telnet/HTTP disabled by default
+- `build_mujina_minerd_armhf.sh`
+  - cross-builds `mujina-minerd` for the Amlogic board using Docker, with a
+    `cargo-zigbuild` fallback if Docker is unavailable
+- `build_s19jpro_amlogic_payload.sh`
+  - extends a base payload by baking `mujina-minerd`, `start.sh`, `stop.sh`,
+    `mujina-hb2.toml`, and `mujina.env` into `/home/root`
 - `mujina_armhf_full/`
   - generated development-oriented output directory
 - `mujina_armhf_base/`
@@ -89,6 +95,23 @@ Build the first release-oriented base profile:
 ```bash
 cd mujina_loader
 ./build_armhf_base_payload.sh
+```
+
+Build a deployable S19j Pro Amlogic payload with the miner bundle already
+staged into `/home/root`:
+
+```bash
+cd mujina_loader
+./build_s19jpro_amlogic_payload.sh
+```
+
+Override the worker name or reuse an existing base payload:
+
+```bash
+cd mujina_loader
+./build_s19jpro_amlogic_payload.sh \
+  --base-payload-dir ./mujina_armhf_base \
+  --pool-user 'your-address.worker'
 ```
 
 Run the stock-board SSH installer flow:

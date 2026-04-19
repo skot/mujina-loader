@@ -3,6 +3,8 @@
 This repo is organized around one release goal:
 
 - build the `mujina_armhf_base` rootfs image
+- optionally extend it into an S19j Pro Amlogic deployment payload with
+  `mujina-minerd` and the board config preloaded into `/home/root`
 - flash it onto Amlogic S21 control boards
 - restore boards back to stock when needed
 
@@ -35,6 +37,13 @@ Build the release image:
 ```bash
 cd mujina_loader
 ./build_armhf_base_payload.sh
+```
+
+Build the S19j Pro-ready payload:
+
+```bash
+cd mujina_loader
+./build_s19jpro_amlogic_payload.sh
 ```
 
 Flash it over USB burn:

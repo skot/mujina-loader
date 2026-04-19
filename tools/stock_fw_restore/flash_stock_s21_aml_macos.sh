@@ -26,7 +26,7 @@ if [[ ! -x "${UPDATE_BIN}" ]]; then
   exit 1
 fi
 
-if [[ ! -e /usr/local/opt/libusb-compat/lib/libusb-0.1.4.dylib ]]; then
+if [[ ! -e /usr/local/opt/libusb-compat/lib/libusb-0.1.4.dylib && ! -e /opt/homebrew/opt/libusb-compat/lib/libusb-0.1.4.dylib ]]; then
   echo "Missing libusb-compat. Run ./install_host_deps.sh first." >&2
   exit 1
 fi
